@@ -1,1 +1,207 @@
-<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Letter Link Solver</title><style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;margin:0;padding:18px;background:#111;color:#fff}button{font-size:18px;padding:12px 16px;margin:6px 4px;border:0;border-radius:10px}#video{width:100%;max-height:55vh;background:#222;border-radius:14px;object-fit:cover}#status{padding:10px 0;color:#bbb}.ok{color:#7ee787}.bad{color:#ff7b72}</style></head><body><h1>🔗 Letter Link Solver</h1><p id="status">Tap Start Camera. If prompted, choose Allow.</p><video id="video" autoplay playsinline muted></video><br><button id="start">📷 Start Camera</button><button id="stop">⏹ Stop</button><script>const video=document.getElementById('video'),status=document.getElementById('status');function msg(t,c=''){status.textContent=t;status.className=c}document.getElementById('start').onclick=async()=>{if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){msg('Camera access is unavailable in this file preview. It must be opened from a normal HTTPS web address.','bad');return}try{const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});video.srcObject=s;await video.play();msg('Camera is on. Point it at the letter board.','ok')}catch(e){msg('Camera permission was blocked. On iPhone, allow camera access for the browser and reload.','bad');console.error(e)}};document.getElementById('stop').onclick=()=>{if(video.srcObject)video.srcObject.getTracks().forEach(t=>t.stop());video.srcObject=null;msg('Camera stopped.')};</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Letter Link Solver</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0d1015;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:14px}
+h1{text-align:center;margin:4px 0;font-size:29px}
+.sub{text-align:center;color:#aeb5c0;margin:0 0 10px}
+.cam{position:relative;width:100%;max-width:520px;margin:auto}
+video{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:16px;background:#1a1d23;display:block}
+.guide{position:absolute;left:10%;top:12%;width:80%;height:76%;border:3px solid #25c76a;border-radius:14px;pointer-events:none}
+.guide:after{content:"ALIGN 4×4 BOARD HERE";position:absolute;top:-28px;left:50%;transform:translateX(-50%);font-size:12px;font-weight:700;white-space:nowrap;color:#25c76a}
+.controls{text-align:center;margin:9px 0}
+button{border:0;border-radius:12px;padding:12px 14px;margin:3px;font-size:16px;font-weight:700}
+.primary{background:#2589ff;color:#fff}.green{background:#20b85c;color:#fff}.dark{background:#2b3038;color:#fff}
+#status{text-align:center;color:#b7bdc7;min-height:22px;font-size:14px}
+#grid{width:min(92vw,360px);margin:12px auto;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.tile{position:relative}.letter{width:100%;aspect-ratio:1;border:2px solid #4d5560;border-radius:12px;background:#1b1f25;color:#fff;text-align:center;font-size:29px;font-weight:800;text-transform:uppercase}
+.pts{position:absolute;right:4px;bottom:3px;width:24px;height:22px;border:0;background:#303640;color:#fff;border-radius:6px;text-align:center;font-size:12px}
+.section{max-width:520px;margin:0 auto}.hint{text-align:center;color:#7f8793;font-size:12px}
+#results{display:flex;flex-direction:column;gap:7px;margin-bottom:25px}
+.result{background:#1b1f25;border-radius:11px;padding:9px 11px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.result button{margin:0;padding:7px 10px;font-size:14px;background:#303640;color:#fff}
+.word{font-size:19px;font-weight:800}.score{color:#65d88b;font-weight:800;font-size:15px}
+#path{width:min(92vw,360px);margin:8px auto;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.pathcell{aspect-ratio:1;border-radius:10px;background:#1b1f25;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;border:2px solid transparent}
+.pathcell.on{border-color:#25c76a;background:#183a28}
+.pathnum{font-size:10px;color:#7ee2a1;position:absolute;margin-top:39px}
+</style>
+</head>
+<body>
+<div class="section">
+<h1>🔗 Letter Link Solver</h1>
+<p class="sub">Line up the 4×4 board inside the green box.</p>
+
+<div class="cam">
+<video id="video" autoplay playsinline muted></video>
+<div class="guide"></div>
+</div>
+
+<div class="controls">
+<button class="primary" id="start">📷 Start Camera</button>
+<button class="green" id="scan">🔎 Scan Board</button>
+<button class="dark" id="stop">Stop</button>
+</div>
+<div id="status">Start the camera, align the board, then scan.</div>
+
+<div id="grid"></div>
+<p class="hint">The small number on each tile is its point value. Correct it if needed.</p>
+
+<div class="controls">
+<button class="primary" id="solve">🧠 Find Best Words</button>
+<button class="dark" id="clear">Clear</button>
+</div>
+
+<h2>Selected Path</h2>
+<div id="path"></div>
+<div id="selected" class="hint">Tap a word below to see its path.</div>
+
+<h2>Words</h2>
+<div id="results"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+const video=document.getElementById('video'), status=document.getElementById('status');
+let stream=null, wordsCache=null;
+
+function buildGrid(){
+ const g=document.getElementById('grid');g.innerHTML='';
+ for(let i=0;i<16;i++){
+  const wrap=document.createElement('div');wrap.className='tile';
+  const inp=document.createElement('input');inp.className='letter';inp.maxLength=1;inp.id='l'+i;inp.autocomplete='off';
+  const pt=document.createElement('input');pt.className='pts';pt.type='number';pt.min=1;pt.max=9;pt.value=1;pt.id='p'+i;
+  wrap.append(inp,pt);g.appendChild(wrap);
+ }
+}
+buildGrid();
+
+function setStatus(x){status.textContent=x}
+document.getElementById('start').onclick=async()=>{
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:960}},audio:false});
+  video.srcObject=stream;await video.play();setStatus('Camera on. Put the entire board inside the green box.');
+ }catch(e){setStatus('Camera permission was blocked. Allow camera access for this site in Safari.')}
+};
+document.getElementById('stop').onclick=()=>{if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;setStatus('Camera stopped.')};
+
+function cropTileCanvas(source,r,c){
+ const w=source.width,h=source.height;
+ // Green guide: x 10%-90%, y 12%-88%.
+ const x0=w*.10,y0=h*.12,bw=w*.80,bh=h*.76;
+ const cw=bw/4,ch=bh/4;
+ const padX=cw*.08,padY=ch*.08;
+ const out=document.createElement('canvas');out.width=240;out.height=240;
+ const ctx=out.getContext('2d');
+ ctx.fillStyle='white';ctx.fillRect(0,0,240,240);
+ ctx.drawImage(source,x0+c*cw+padX,y0+r*ch+padY,cw-2*padX,ch-2*padY,0,0,240,240);
+ // grayscale/contrast for OCR
+ const img=ctx.getImageData(0,0,240,240), d=img.data;
+ for(let i=0;i<d.length;i+=4){let v=.299*d[i]+.587*d[i+1]+.114*d[i+2];v=Math.max(0,Math.min(255,(v-128)*2+128));d[i]=d[i+1]=d[i+2]=v}
+ ctx.putImageData(img,0,0);return out;
+}
+
+async function ocrTile(canvas){
+ const o=await Tesseract.recognize(canvas,'eng',{config:{tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ',tessedit_pageseg_mode:'10'}});
+ const t=(o.data.text||'').toUpperCase().replace(/[^A-Z]/g,'');
+ return t[0]||'';
+}
+
+document.getElementById('scan').onclick=async()=>{
+ if(!stream){setStatus('Start the camera first.');return}
+ setStatus('Scanning the 16 tiles… keep the board still.');
+ const source=document.createElement('canvas');source.width=video.videoWidth||1280;source.height=video.videoHeight||960;
+ source.getContext('2d').drawImage(video,0,0,source.width,source.height);
+ try{
+  for(let i=0;i<16;i++){
+   const r=Math.floor(i/4),c=i%4;
+   setStatus('Reading tile '+(i+1)+' of 16…');
+   const letter=await ocrTile(cropTileCanvas(source,r,c));
+   document.getElementById('l'+i).value=letter;
+  }
+  setStatus('Scan complete. Check the letters, then tap Find Best Words.');
+  findWords();
+ }catch(e){console.error(e);setStatus('Scan failed. Try brighter light and make the board fill the green box.')}
+};
+
+function getGrid(){return Array.from({length:16},(_,i)=>(document.getElementById('l'+i).value||'').toUpperCase())}
+function getPts(){return Array.from({length:16},(_,i)=>Number(document.getElementById('p'+i).value)||1)}
+
+function neighbors(i){
+ const r=Math.floor(i/4),c=i%4,a=[];
+ for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+  if(!dr&&!dc)continue;let rr=r+dr,cc=c+dc;
+  if(rr>=0&&rr<4&&cc>=0&&cc<4)a.push(rr*4+cc);
+ }
+ return a;
+}
+
+function pathFor(word,g){
+ function dfs(i,used,path){
+  if(i===word.length)return path.slice();
+  for(const n of neighbors(i===0?-1:path[path.length-1])){
+   if(used.has(n)||g[n]!==word[i])continue;
+   used.add(n);path.push(n);
+   const ans=dfs(n,used,path);if(ans)return ans;
+   path.pop();used.delete(n);
+  }
+  return null;
+ }
+ for(let start=0;start<16;start++){
+  if(g[start]!==word[0])continue;
+  const ans=dfs(start,new Set([start]),[start]);if(ans)return ans;
+ }
+ return null;
+}
+
+// A compact built-in dictionary plus optional large online dictionary.
+const BASE=`able about above act action add age ago air all almost along also always an and animal answer any apple area arm around art ask at back bad bag ball bank bar base be beach bear beat bed bee before begin best better big bird bit black blue boat body book both boy bread bring brother brown build but buy call came can car care carry cat cause change check child city class clean clear close cold color come common could country course cover cow cut day did different do dog door down draw dream dress drink drive dry each early earth east eat eight end enough even ever every eye face fact fall family far farm fast father feel few field find fine fire first fish five floor fly food foot for four free friend from full game garden gas gave get girl give go good got great green group grow had half hand happen happy hard hat have he head hear heart help her here high him his hit home hope horse hot house how idea if important in into is it its job jump just keep kind king know land large last late laugh law learn left leg less let life light like line little live long look lot love made make man many map may me mean men might mile mind minute money moon more morning most mother mountain move much music must my name near need never new next night no not nothing now number off often old on once one only open or other our out over own page part party place plan play please point put rain read red right road rock room run same say school sea second see seem set seven she ship short should show side simple six small so some song soon sound south start state stay step still stop story street strong sun sure take talk tall team tell ten than thank that the their them then there these they thing think this three through time to today together too top town tree try two under until up us use very walk want war water way we well went were west what when where which while white who why will win wind with woman word work world would write year yes you young your live love link like line wine well will view vile veil vein week wake walk wall lake leak lean leaf leave weave wave even evil live`.toUpperCase().split(/\s+/);
+
+async function loadWords(){
+ if(wordsCache)return wordsCache;
+ try{
+  const raw=await fetch('https://cdn.jsdelivr.net/gh/dwyl/english-words@master/words_alpha.txt',{cache:'force-cache'});
+  if(raw.ok){const txt=await raw.text();wordsCache=[...new Set(txt.toUpperCase().split(/\s+/).filter(w=>/^[A-Z]{3,16}$/.test(w)))];return wordsCache}
+ }catch(e){}
+ wordsCache=[...new Set(BASE)];return wordsCache;
+}
+
+async function findWords(){
+ const g=getGrid();if(g.some(x=>!x)){setStatus('Enter all 16 letters first.');return}
+ setStatus('Finding connected words…');
+ const dict=await loadWords(),pts=getPts(),out=[];
+ for(const w of dict){
+  if(w.length<3||w.length>16)continue;
+  const path=pathFor(w,g);if(!path)continue;
+  const score=path.reduce((sum,i)=>sum+pts[i],0);
+  out.push({w,path,score});
+ }
+ out.sort((a,b)=>b.score-a.score||b.w.length-a.w.length||a.w.localeCompare(b.w));
+ renderResults(out.slice(0,120));setStatus(out.length+' connected words found.');
+}
+function renderResults(list){
+ const el=document.getElementById('results');el.innerHTML='';
+ list.forEach(x=>{
+  const row=document.createElement('div');row.className='result';
+  row.innerHTML='<div><div class="word">'+x.w+'</div><div class="score">'+x.score+' pts · '+x.w.length+' letters</div></div>';
+  const b=document.createElement('button');b.textContent='Show path';b.onclick=()=>showPath(x);
+  row.appendChild(b);el.appendChild(row);
+ });
+}
+function showPath(x){
+ const g=getGrid(),p=document.getElementById('path');p.innerHTML='';
+ for(let i=0;i<16;i++){
+  const d=document.createElement('div');d.className='pathcell'+(x.path.includes(i)?' on':'');d.textContent=g[i];
+  if(x.path.includes(i)){const n=document.createElement('span');n.className='pathnum';n.textContent=x.path.indexOf(i)+1;d.appendChild(n)}
+  p.appendChild(d);
+ }
+ document.getElementById('selected').textContent=x.w+'  →  '+x.path.map(i=>String(i+1)).join(' → ');
+}
+document.getElementById('solve').onclick=findWords;
+document.getElementById('clear').onclick=()=>{for(let i=0;i<16;i++){document.getElementById('l'+i).value='';document.getElementById('p'+i).value=1}document.getElementById('results').innerHTML='';document.getElementById('path').innerHTML='';setStatus('Grid cleared.')};
+</script>
+</body></html>
